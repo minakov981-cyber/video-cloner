@@ -100,7 +100,7 @@ def encode_image(image_path: str) -> str:
 
 
 def analyze_frame(frame_path: str, change: str = None, video_change: str = None) -> dict:
-    print("Analyzing frame with GPT-5.5...")
+    print("Analyzing frame with GPT-4o...")
     b64 = encode_image(frame_path)
 
     change_instruction = (
@@ -114,7 +114,7 @@ def analyze_frame(frame_path: str, change: str = None, video_change: str = None)
     ) if video_change else ""
 
     response = client.chat.completions.create(
-        model="gpt-5.5",
+        model="gpt-4o",
         messages=[
             {
                 "role": "system",
@@ -298,7 +298,7 @@ def generate_video_magnific(image_path: str, prompt: str, aspect_ratio: str, out
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Extract a frame and generate image/video prompts via GPT-5.5")
+    parser = argparse.ArgumentParser(description="Extract a frame and generate image/video prompts via GPT-4o")
     parser.add_argument("video", help="Path to the video file")
     parser.add_argument("--second", type=int, default=0, help="Second to extract the frame from (default: 0)")
     parser.add_argument("--change", type=str, default=None, help="Modification to apply to image_prompt only, e.g. 'replace woman with a man in a suit'")
