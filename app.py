@@ -5,6 +5,7 @@ from pathlib import Path
 
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
+from werkzeug.serving import WSGIRequestHandler
 from werkzeug.utils import secure_filename
 
 from video_analyzer import (
@@ -15,7 +16,15 @@ from video_analyzer import (
     generate_video_magnific,
 )
 
+REQUEST_TIMEOUT = 600  # seconds
+
+
+class LongTimeoutHandler(WSGIRequestHandler):
+    timeout = REQUEST_TIMEOUT
+
+
 app = Flask(__name__, static_folder="static", static_url_path="")
+app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024  # 500 MB
 CORS(app)
 
 UPLOAD_DIR = Path("uploads")
@@ -28,7 +37,7 @@ jobs: dict = {}
 STEPS = [
     "Extracting frame from video",
     "Detecting aspect ratio",
-    "Analyzing frame with GPT-4o",
+    "Analyzing frame with GPT-5.5",
     "Generating image (Magnific API)",
     "Generating video (Kling 2.6 Pro)",
     "Pipeline complete",
@@ -190,4 +199,5 @@ def result_video(job_id):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True,
+            request_handler=LongTimeoutHandler)
