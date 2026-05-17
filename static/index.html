@@ -856,41 +856,71 @@
       }
 
       currentJobId = data.job_id;
-      if (pollTimer) clearInterval(pollTimer);
-      pollTimer = setInterval(() => poll(currentJobId), 3000);
-      poll(currentJobId);
+      startPolling(currentJobId);
 
     } catch (e) {
-      showError('Network error: ' + e.message);
+      showError('Failed to start job: ' + e.message);
       resetBtn();
     }
   }
 
+  const POLL_INTERVAL_MS  = 5000;        // 5 seconds between requests
+  const POLL_TIMEOUT_MS   = 15 * 60 * 1000; // 15 minutes max
+  let pollDeadline = 0;
+
+  function startPolling(jobId) {
+    if (pollTimer) clearInterval(pollTimer);
+    pollDeadline = Date.now() + POLL_TIMEOUT_MS;
+    pollTimer = setInterval(() => poll(jobId), POLL_INTERVAL_MS);
+    poll(jobId); // immediate first check
+  }
+
   async function poll(jobId) {
+    // Timeout guard
+    if (Date.now() > pollDeadline) {
+      clearInterval(pollTimer);
+      document.getElementById('pipelineStatus').textContent = 'Timeout';
+      showError('No response from server after 15 minutes. The job may still be running — refresh and check later.');
+      resetBtn();
+      return;
+    }
+
+    let res;
     try {
-      const res  = await fetch(`/status/${jobId}`);
-      const data = await res.json();
+      res = await fetch(`/status/${jobId}`);
+    } catch (e) {
+      // Network hiccup — log and keep polling
+      console.warn('Poll network error (retrying):', e.message);
+      return;
+    }
 
-      renderSteps(data.step, data.status);
+    // Server returned an HTTP error
+    if (!res.ok) {
+      clearInterval(pollTimer);
+      document.getElementById('pipelineStatus').textContent = 'Error';
+      showError(`Server error ${res.status}: ${res.statusText}`);
+      resetBtn();
+      return;
+    }
 
+    const data = await res.json();
+    renderSteps(data.step, data.status);
+
+    if (data.image_ready) revealImage(jobId);
+    if (data.video_ready) revealVideo(jobId);
+
+    if (data.status === 'complete') {
+      clearInterval(pollTimer);
+      document.getElementById('pipelineStatus').textContent = 'Done';
+      if (data.result) showPrompts(data.result);
       if (data.image_ready) revealImage(jobId);
       if (data.video_ready) revealVideo(jobId);
-
-      if (data.status === 'complete') {
-        clearInterval(pollTimer);
-        document.getElementById('pipelineStatus').textContent = 'Done';
-        if (data.result) showPrompts(data.result);
-        if (data.image_ready) revealImage(jobId);
-        if (data.video_ready) revealVideo(jobId);
-        resetBtn();
-      } else if (data.status === 'error') {
-        clearInterval(pollTimer);
-        document.getElementById('pipelineStatus').textContent = 'Failed';
-        showError(data.error || 'An error occurred during the pipeline.');
-        resetBtn();
-      }
-    } catch (e) {
-      console.warn('Poll error:', e);
+      resetBtn();
+    } else if (data.status === 'error') {
+      clearInterval(pollTimer);
+      document.getElementById('pipelineStatus').textContent = 'Failed';
+      showError(data.error || 'An error occurred during the pipeline.');
+      resetBtn();
     }
   }
 
