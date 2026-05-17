@@ -1,6 +1,8 @@
 import os
+import sys
 import uuid
 import threading
+import traceback
 from pathlib import Path
 
 from flask import Flask, request, jsonify, send_file
@@ -82,14 +84,22 @@ def generate():
         "result": None,
     }
 
+    print(f"[{job_id[:8]}] Job created | file={filename} | size={os.path.getsize(video_path)} bytes", flush=True)
+
     thread = threading.Thread(
         target=_run_pipeline,
         args=(job_id, video_path, second, image_change, video_change),
         daemon=True,
+        name=f"pipeline-{job_id[:8]}",
     )
     thread.start()
+    print(f"[{job_id[:8]}] Pipeline thread started: {thread.name}", flush=True)
 
     return jsonify({"job_id": job_id})
+
+
+def _log(job_id: str, msg: str):
+    print(f"[{job_id[:8]}] {msg}", flush=True)
 
 
 def _set_step(job_id: str, index: int):
@@ -98,39 +108,59 @@ def _set_step(job_id: str, index: int):
 
 
 def _run_pipeline(job_id: str, video_path: str, second: float, image_change, video_change):
+    _log(job_id, f"=== Pipeline started | thread={threading.current_thread().name} ===")
+    _log(job_id, f"Video: {video_path}")
+    _log(job_id, f"Second: {second} | image_change: {image_change!r} | video_change: {video_change!r}")
+
     try:
         out_dir = OUTPUT_DIR / job_id
         out_dir.mkdir(exist_ok=True)
 
         # Step 1 — extract frame
+        _log(job_id, "Step 1: extracting frame from video...")
         _set_step(job_id, 0)
         frame_path = str(out_dir / "frame.jpg")
         extract_frame(video_path, second, frame_path)
         jobs[job_id]["frame_ready"] = True
+        _log(job_id, f"Step 1 done: frame saved to {frame_path}")
 
         # Step 2 — aspect ratio
+        _log(job_id, "Step 2: detecting aspect ratio...")
         _set_step(job_id, 1)
         aspect_ratio = get_aspect_ratio(video_path)
+        _log(job_id, f"Step 2 done: aspect_ratio={aspect_ratio}")
 
         # Step 3 — GPT analysis
+        _log(job_id, "Step 3: analyzing frame with GPT-5.5...")
         _set_step(job_id, 2)
         analysis = analyze_frame(frame_path, change=image_change, video_change=video_change)
         image_prompt = analysis.get("image_prompt", "")
         video_prompt = analysis.get("video_prompt", "")
+        _log(job_id, f"Step 3 done: image_prompt length={len(image_prompt)} chars, video_prompt length={len(video_prompt)} chars")
 
         # Step 4 — generate image
+        _log(job_id, "Step 4: generating image via Magnific API...")
         _set_step(job_id, 3)
         generated_image, _ = generate_image_magnific(image_prompt, aspect_ratio, out_dir)
         if generated_image:
             jobs[job_id]["image_ready"] = True
+            _log(job_id, f"Step 4 done: image saved to {generated_image}")
+        else:
+            _log(job_id, "Step 4: image generation skipped or failed (no MAGNIFIC_API_KEY or API error)")
 
         # Step 5 — generate video
+        _log(job_id, "Step 5: generating video via Kling 2.6 Pro...")
         _set_step(job_id, 4)
         generated_video = None
         if generated_image:
             generated_video = generate_video_magnific(generated_image, video_prompt, aspect_ratio, out_dir)
             if generated_video:
                 jobs[job_id]["video_ready"] = True
+                _log(job_id, f"Step 5 done: video saved to {generated_video}")
+            else:
+                _log(job_id, "Step 5: video generation failed or timed out")
+        else:
+            _log(job_id, "Step 5: skipped (no generated image)")
 
         # Step 6 — complete
         _set_step(job_id, 5)
@@ -142,17 +172,21 @@ def _run_pipeline(job_id: str, video_path: str, second: float, image_change, vid
                 "aspect_ratio": aspect_ratio,
             },
         })
+        _log(job_id, "=== Pipeline complete ===")
 
-    except SystemExit:
-        jobs[job_id].update({
-            "status": "error",
-            "error": "Pipeline exited unexpectedly. Ensure ffmpeg is installed and the video file is valid.",
-        })
+    except SystemExit as exc:
+        error_msg = (
+            "Pipeline exited unexpectedly. "
+            "Ensure ffmpeg is installed and the video file is valid."
+        )
+        _log(job_id, f"ERROR (SystemExit code={exc.code}): {error_msg}")
+        jobs[job_id].update({"status": "error", "error": error_msg})
+
     except Exception as exc:
-        jobs[job_id].update({
-            "status": "error",
-            "error": str(exc),
-        })
+        tb = traceback.format_exc()
+        _log(job_id, f"ERROR ({type(exc).__name__}): {exc}")
+        _log(job_id, f"Traceback:\n{tb}")
+        jobs[job_id].update({"status": "error", "error": str(exc)})
 
 
 @app.route("/status/<job_id>")
