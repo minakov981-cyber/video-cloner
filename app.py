@@ -65,7 +65,7 @@ def generate():
     image_change = request.form.get("image_change") or None
     video_change = request.form.get("video_change") or None
     mode = request.form.get("mode", "full")
-    if mode not in ("prompts", "image", "full"):
+    if mode not in ("prompts_only", "image_only", "full"):
         mode = "full"
 
     job_id = str(uuid.uuid4())
@@ -143,8 +143,8 @@ def _run_pipeline(job_id: str, video_path: str, second: float, image_change, vid
         _log(job_id, f"Step 3 done: image_prompt length={len(image_prompt)} chars, video_prompt length={len(video_prompt)} chars")
 
         # ── Early exit: prompts only ───────────────────────────
-        if mode == "prompts":
-            _log(job_id, "Mode=prompts: stopping after GPT analysis")
+        if mode == "prompts_only":
+            _log(job_id, "Mode=prompts_only: stopping after GPT analysis")
             jobs[job_id].update({
                 "status": "complete",
                 "result": {
@@ -153,7 +153,7 @@ def _run_pipeline(job_id: str, video_path: str, second: float, image_change, vid
                     "aspect_ratio": aspect_ratio,
                 },
             })
-            _log(job_id, "=== Pipeline complete (prompts mode) ===")
+            _log(job_id, "=== Pipeline complete (prompts_only) ===")
             return
 
         # Step 4 — generate image
@@ -167,8 +167,8 @@ def _run_pipeline(job_id: str, video_path: str, second: float, image_change, vid
             _log(job_id, "Step 4: image generation skipped or failed (no MAGNIFIC_API_KEY or API error)")
 
         # ── Early exit: image only ─────────────────────────────
-        if mode == "image":
-            _log(job_id, "Mode=image: stopping after image generation")
+        if mode == "image_only":
+            _log(job_id, "Mode=image_only: stopping after image generation")
             jobs[job_id].update({
                 "status": "complete",
                 "result": {
@@ -177,7 +177,7 @@ def _run_pipeline(job_id: str, video_path: str, second: float, image_change, vid
                     "aspect_ratio": aspect_ratio,
                 },
             })
-            _log(job_id, "=== Pipeline complete (image mode) ===")
+            _log(job_id, "=== Pipeline complete (image_only) ===")
             return
 
         # Step 5 — generate video (full mode only)

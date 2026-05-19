@@ -679,12 +679,12 @@
         <span class="mode-group-label">Generation Mode</span>
         <div class="mode-chips">
           <label class="mode-chip" id="chipPrompts">
-            <input type="checkbox" value="prompts">
+            <input type="checkbox" value="prompts_only">
             <span class="mode-chip-dot"></span>
             Prompts only
           </label>
           <label class="mode-chip" id="chipImage">
-            <input type="checkbox" value="image">
+            <input type="checkbox" value="image_only">
             <span class="mode-chip-dot"></span>
             Image only
           </label>
@@ -793,9 +793,9 @@
   ];
 
   const STEPS_BY_MODE = {
-    prompts: ALL_STEPS.slice(0, 3),
-    image:   ALL_STEPS.slice(0, 4),
-    full:    ALL_STEPS,
+    prompts_only: ALL_STEPS.slice(0, 3),
+    image_only:   ALL_STEPS.slice(0, 4),
+    full:         ALL_STEPS,
   };
 
   let selectedFile  = null;
@@ -869,7 +869,7 @@
   }
 
   function setMediaRowMode(mode) {
-    document.querySelector('.media-row').classList.toggle('single-col', mode !== 'full');
+    document.querySelector('.media-row').classList.toggle('single-col', mode === 'image_only');
   }
 
   function setVideo(file) {
