@@ -64,6 +64,9 @@ def generate():
 
     image_change = request.form.get("image_change") or None
     video_change = request.form.get("video_change") or None
+    mode = request.form.get("mode", "full")
+    if mode not in ("prompts", "image", "full"):
+        mode = "full"
 
     job_id = str(uuid.uuid4())
     upload_path = UPLOAD_DIR / job_id
@@ -77,6 +80,7 @@ def generate():
         "status": "running",
         "step": 0,
         "step_name": "",
+        "mode": mode,
         "error": None,
         "frame_ready": False,
         "image_ready": False,
@@ -84,11 +88,11 @@ def generate():
         "result": None,
     }
 
-    print(f"[{job_id[:8]}] Job created | file={filename} | size={os.path.getsize(video_path)} bytes", flush=True)
+    print(f"[{job_id[:8]}] Job created | file={filename} | size={os.path.getsize(video_path)} bytes | mode={mode}", flush=True)
 
     thread = threading.Thread(
         target=_run_pipeline,
-        args=(job_id, video_path, second, image_change, video_change),
+        args=(job_id, video_path, second, image_change, video_change, mode),
         daemon=True,
         name=f"pipeline-{job_id[:8]}",
     )
@@ -107,8 +111,8 @@ def _set_step(job_id: str, index: int):
     jobs[job_id]["step_name"] = STEPS[index]
 
 
-def _run_pipeline(job_id: str, video_path: str, second: float, image_change, video_change):
-    _log(job_id, f"=== Pipeline started | thread={threading.current_thread().name} ===")
+def _run_pipeline(job_id: str, video_path: str, second: float, image_change, video_change, mode: str = "full"):
+    _log(job_id, f"=== Pipeline started | thread={threading.current_thread().name} | mode={mode} ===")
     _log(job_id, f"Video: {video_path}")
     _log(job_id, f"Second: {second} | image_change: {image_change!r} | video_change: {video_change!r}")
 
@@ -138,6 +142,20 @@ def _run_pipeline(job_id: str, video_path: str, second: float, image_change, vid
         video_prompt = analysis.get("video_prompt", "")
         _log(job_id, f"Step 3 done: image_prompt length={len(image_prompt)} chars, video_prompt length={len(video_prompt)} chars")
 
+        # ── Early exit: prompts only ───────────────────────────
+        if mode == "prompts":
+            _log(job_id, "Mode=prompts: stopping after GPT analysis")
+            jobs[job_id].update({
+                "status": "complete",
+                "result": {
+                    "image_prompt": image_prompt,
+                    "video_prompt": video_prompt,
+                    "aspect_ratio": aspect_ratio,
+                },
+            })
+            _log(job_id, "=== Pipeline complete (prompts mode) ===")
+            return
+
         # Step 4 — generate image
         _log(job_id, "Step 4: generating image via Magnific API...")
         _set_step(job_id, 3)
@@ -148,7 +166,21 @@ def _run_pipeline(job_id: str, video_path: str, second: float, image_change, vid
         else:
             _log(job_id, "Step 4: image generation skipped or failed (no MAGNIFIC_API_KEY or API error)")
 
-        # Step 5 — generate video
+        # ── Early exit: image only ─────────────────────────────
+        if mode == "image":
+            _log(job_id, "Mode=image: stopping after image generation")
+            jobs[job_id].update({
+                "status": "complete",
+                "result": {
+                    "image_prompt": image_prompt,
+                    "video_prompt": video_prompt,
+                    "aspect_ratio": aspect_ratio,
+                },
+            })
+            _log(job_id, "=== Pipeline complete (image mode) ===")
+            return
+
+        # Step 5 — generate video (full mode only)
         _log(job_id, "Step 5: generating video via Kling 2.6 Pro...")
         _set_step(job_id, 4)
         generated_video = None
@@ -172,7 +204,7 @@ def _run_pipeline(job_id: str, video_path: str, second: float, image_change, vid
                 "aspect_ratio": aspect_ratio,
             },
         })
-        _log(job_id, "=== Pipeline complete ===")
+        _log(job_id, "=== Pipeline complete (full mode) ===")
 
     except SystemExit as exc:
         error_msg = (

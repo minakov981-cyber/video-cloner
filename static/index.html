@@ -559,6 +559,60 @@
       line-height: 1.5;
     }
 
+    /* ── Mode Chips ──────────────────────────────────────── */
+    .mode-group { display: flex; flex-direction: column; gap: 6px; }
+
+    .mode-group-label {
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--text-muted);
+      letter-spacing: 0.01em;
+    }
+
+    .mode-chips { display: flex; gap: 8px; }
+
+    .mode-chip {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 7px 10px;
+      background: var(--surface);
+      border: 1px solid var(--border-hi);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      user-select: none;
+      transition: border-color 0.15s, background 0.15s, color 0.15s;
+    }
+
+    .mode-chip:hover { border-color: var(--accent); color: var(--text); }
+
+    .mode-chip input[type="checkbox"] { display: none; }
+
+    .mode-chip.active {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      color: var(--accent-hi);
+    }
+
+    .mode-chip-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      border: 1.5px solid currentColor;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+
+    .mode-chip.active .mode-chip-dot { background: currentColor; }
+
+    /* single-col: image spans full width when video is absent */
+    .media-row.single-col { grid-template-columns: 1fr; }
+
     /* ── Utility ─────────────────────────────────────────── */
     .hidden { display: none !important; }
   </style>
@@ -618,6 +672,23 @@
       <div class="field">
         <label for="videoChange">Video Instructions</label>
         <textarea id="videoChange" placeholder="e.g. add slow cinematic dolly push-in camera movement"></textarea>
+      </div>
+
+      <!-- Mode Selection -->
+      <div class="mode-group">
+        <span class="mode-group-label">Generation Mode</span>
+        <div class="mode-chips">
+          <label class="mode-chip" id="chipPrompts">
+            <input type="checkbox" value="prompts">
+            <span class="mode-chip-dot"></span>
+            Prompts only
+          </label>
+          <label class="mode-chip" id="chipImage">
+            <input type="checkbox" value="image">
+            <span class="mode-chip-dot"></span>
+            Image only
+          </label>
+        </div>
       </div>
 
       <!-- Generate -->
@@ -712,7 +783,7 @@
 </div>
 
 <script>
-  const STEPS = [
+  const ALL_STEPS = [
     "Extracting frame from video",
     "Detecting aspect ratio",
     "Analyzing frame with GPT-5.5",
@@ -721,9 +792,16 @@
     "Pipeline complete",
   ];
 
-  let selectedFile = null;
-  let currentJobId = null;
-  let pollTimer = null;
+  const STEPS_BY_MODE = {
+    prompts: ALL_STEPS.slice(0, 3),
+    image:   ALL_STEPS.slice(0, 4),
+    full:    ALL_STEPS,
+  };
+
+  let selectedFile  = null;
+  let currentJobId  = null;
+  let currentMode   = 'full';
+  let pollTimer     = null;
 
   // ── Drop Zone ──────────────────────────────────────────────
 
@@ -766,6 +844,34 @@
     fileInput.click();
   });
 
+  // ── Mode Chips (mutually exclusive toggle) ─────────────────
+
+  document.querySelectorAll('.mode-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const input = chip.querySelector('input');
+      const wasActive = chip.classList.contains('active');
+      // Deactivate all chips
+      document.querySelectorAll('.mode-chip').forEach(c => {
+        c.classList.remove('active');
+        c.querySelector('input').checked = false;
+      });
+      // Toggle: if it wasn't active, activate it; otherwise leave all off (= full)
+      if (!wasActive) {
+        chip.classList.add('active');
+        input.checked = true;
+      }
+    });
+  });
+
+  function getSelectedMode() {
+    const active = document.querySelector('.mode-chip.active input');
+    return active ? active.value : 'full';
+  }
+
+  function setMediaRowMode(mode) {
+    document.querySelector('.media-row').classList.toggle('single-col', mode !== 'full');
+  }
+
   function setVideo(file) {
     selectedFile = file;
     const url = URL.createObjectURL(file);
@@ -780,8 +886,9 @@
 
   function renderSteps(step, status) {
     // step is 1-based; 0 = not started
+    const steps = STEPS_BY_MODE[currentMode] || ALL_STEPS;
     const list = document.getElementById('stepsList');
-    list.innerHTML = STEPS.map((label, i) => {
+    list.innerHTML = steps.map((label, i) => {
       let cls = 'pending';
       if (status === 'complete') {
         cls = 'done';
@@ -819,6 +926,7 @@
     const second      = document.getElementById('second').value || '0';
     const imageChange = document.getElementById('imageChange').value.trim();
     const videoChange = document.getElementById('videoChange').value.trim();
+    currentMode       = getSelectedMode();
 
     // Reset right panel
     document.getElementById('emptyState').classList.add('hidden');
@@ -827,6 +935,7 @@
     document.getElementById('promptsCard').classList.add('hidden');
     document.getElementById('imageCard').classList.add('hidden');
     document.getElementById('videoCard').classList.add('hidden');
+    setMediaRowMode(currentMode);
 
     const btn = document.getElementById('generateBtn');
     btn.disabled = true;
@@ -842,6 +951,7 @@
     const fd = new FormData();
     fd.append('video', selectedFile);
     fd.append('second', second);
+    fd.append('mode', currentMode);
     if (imageChange) fd.append('image_change', imageChange);
     if (videoChange) fd.append('video_change', videoChange);
 
