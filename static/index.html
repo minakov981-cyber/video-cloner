@@ -847,7 +847,8 @@
   // ── Mode Chips (mutually exclusive toggle) ─────────────────
 
   document.querySelectorAll('.mode-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
+    chip.addEventListener('click', (e) => {
+      e.preventDefault();
       const input = chip.querySelector('input');
       const wasActive = chip.classList.contains('active');
       // Deactivate all chips
