@@ -374,60 +374,14 @@
     .card-body { padding: 18px; }
 
     /* ── Pipeline Steps ──────────────────────────────────── */
-    .steps { display: flex; flex-direction: column; }
-
-    .step {
-      display: flex;
-      align-items: flex-start;
-      gap: 13px;
-      position: relative;
-    }
-
-    /* vertical connector */
-    .step:not(:last-child) .step-track {
-      position: absolute;
-      left: 10px;
-      top: 22px;
-      bottom: 0;
-      width: 1.5px;
-      background: var(--border-hi);
-      transition: background 0.4s;
-    }
-
-    .step.done:not(:last-child) .step-track {
-      background: var(--success);
-    }
-
-    .step-indicator {
-      width: 21px;
-      height: 21px;
-      border-radius: 50%;
-      border: 1.5px solid var(--border-hi);
-      background: var(--surface);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      z-index: 1;
-      margin-top: 1px;
-      transition: border-color 0.25s, background 0.25s, box-shadow 0.25s;
-    }
-
-    .step.done .step-indicator {
-      background: var(--success);
-      border-color: var(--success);
-    }
-
-    .step.active .step-indicator {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 4px var(--accent-dim);
-      animation: pulse-ring 1.8s ease-in-out infinite;
-    }
-
-    .step.error .step-indicator {
-      background: var(--error);
-      border-color: var(--error);
-    }
+    .steps { display: flex; flex-direction: row; align-items: flex-start; gap: 0; }
+    .step { display: flex; flex-direction: column; align-items: center; flex: 1; position: relative; }
+    .step:not(:last-child) .step-track { position: absolute; top: 10px; left: 50%; width: 100%; height: 1.5px; background: var(--border-hi); transition: background 0.4s; z-index: 0; }
+    .step.done:not(:last-child) .step-track { background: var(--success); }
+    .step-indicator { width: 21px; height: 21px; border-radius: 50%; border: 1.5px solid var(--border-hi); background: var(--surface); display: flex; align-items: center; justify-content: center; flex-shrink: 0; z-index: 1; transition: border-color 0.25s, background 0.25s, box-shadow 0.25s; }
+    .step.done .step-indicator { background: var(--success); border-color: var(--success); }
+    .step.active .step-indicator { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-dim); animation: pulse-ring 1.8s ease-in-out infinite; }
+    .step.error .step-indicator { background: var(--error); border-color: var(--error); }
 
     @keyframes pulse-ring {
       0%, 100% { box-shadow: 0 0 0 4px var(--accent-dim); }
@@ -436,40 +390,17 @@
 
     .step-check { display: none; font-size: 10px; color: white; font-weight: 700; }
     .step.done .step-check { display: block; }
-
-    .step-spin {
-      display: none;
-      width: 9px;
-      height: 9px;
-      border: 1.5px solid var(--accent-hi);
-      border-top-color: transparent;
-      border-radius: 50%;
-      animation: spin 0.75s linear infinite;
-    }
-
+    .step-spin { display: none; width: 9px; height: 9px; border: 1.5px solid var(--accent-hi); border-top-color: transparent; border-radius: 50%; animation: spin 0.75s linear infinite; }
     .step.active .step-spin { display: block; }
-
     .step-err { display: none; font-size: 10px; color: white; font-weight: 700; }
     .step.error .step-err { display: block; }
 
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    .step-body {
-      flex: 1;
-      padding: 1px 0 20px;
-    }
-
-    .step:last-child .step-body { padding-bottom: 0; }
-
-    .step-label {
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-dim);
-      transition: color 0.2s;
-    }
-
+    .step-body { padding: 6px 4px 0; text-align: center; }
+    .step-label { font-size: 11px; font-weight: 500; color: var(--text-dim); transition: color 0.2s; }
     .step.active .step-label { color: var(--text); }
-    .step.done  .step-label { color: var(--text-muted); }
+    .step.done .step-label { color: var(--text-muted); }
     .step.error .step-label { color: var(--error); }
 
     /* ── Prompts ─────────────────────────────────────────── */
@@ -818,12 +749,12 @@
 
 <script>
   const ALL_STEPS = [
-    "Extracting frame from video",
-    "Detecting aspect ratio",
-    "Analyzing frame with GPT-5.5",
-    "Generating image (Magnific API)",
-    "Generating video (Kling 2.6 Pro)",
-    "Pipeline complete",
+    "Extracting frame",
+    "Aspect ratio",
+    "GPT Prompts",
+    "NanoBanana",
+    "Kling Generation",
+    "Done",
   ];
 
   const STEPS_BY_MODE = {
