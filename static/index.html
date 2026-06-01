@@ -157,7 +157,8 @@
       color: var(--text-dim);
     }
 
-    .drop-zone video#videoPreview {
+    .drop-zone video#videoPreview,
+    .drop-zone img#imagePreview {
       width: 100%;
       max-height: 220px;
       object-fit: cover;
@@ -165,17 +166,13 @@
       border-radius: calc(var(--radius) - 1px);
     }
 
-    .drop-zone.has-video {
+    .drop-zone.has-file {
       min-height: 0;
       border-style: solid;
     }
 
-    .drop-zone.has-video #dropPlaceholder {
+    .drop-zone.has-file #dropPlaceholder {
       display: none;
-    }
-
-    .drop-zone.has-video video#videoPreview {
-      display: block;
     }
 
     .video-overlay {
@@ -188,7 +185,7 @@
       display: none;
     }
 
-    .drop-zone.has-video .video-overlay {
+    .drop-zone.has-file .video-overlay {
       display: block;
     }
 
@@ -589,9 +586,10 @@
       <!-- Drop Zone -->
       <div class="drop-zone" id="dropZone">
         <video id="videoPreview" muted playsinline loop></video>
+        <img id="imagePreview" alt="Preview">
         <div class="video-overlay">
           <div class="video-file-name" id="videoFileName"></div>
-          <button class="change-video-btn" id="changeVideoBtn">Change video</button>
+          <button class="change-video-btn" id="changeVideoBtn">Change file</button>
         </div>
         <div class="drop-placeholder" id="dropPlaceholder">
           <div class="drop-icon">
@@ -599,14 +597,14 @@
               <path d="M15 10l4.553-2.277A1 1 0 0121 8.677V15.32a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
             </svg>
           </div>
-          <p>Drop video here or click to browse</p>
-          <span>MP4, MOV, AVI · up to 500 MB</span>
+          <p>Drop video or image here or click to browse</p>
+          <span>MP4, MOV, AVI, JPG, PNG · up to 500 MB</span>
         </div>
-        <input type="file" id="fileInput" accept="video/*">
+        <input type="file" id="fileInput" accept="video/*,image/*">
       </div>
 
       <!-- Frame Second -->
-      <div class="field">
+      <div class="field" id="secondField">
         <label for="second">Frame Second</label>
         <input type="number" id="second" value="0" step="0.1" min="0" placeholder="e.g. 3.5">
       </div>
@@ -757,22 +755,32 @@
     "Done",
   ];
 
+  // For image source the first two pipeline steps are skipped on the server,
+  // so we only display steps starting from "GPT Prompts".
+  const IMAGE_STEP_OFFSET = 2;
+
   const STEPS_BY_MODE = {
-    prompts_only: ALL_STEPS.slice(0, 3),
-    image_only:   ALL_STEPS.slice(0, 4),
-    full:         ALL_STEPS,
+    prompts_only:       ALL_STEPS.slice(0, 3),
+    image_only:         ALL_STEPS.slice(0, 4),
+    full:               ALL_STEPS,
+    image_prompts_only: ALL_STEPS.slice(2, 3),
+    image_image_only:   ALL_STEPS.slice(2, 4),
+    image_full:         ALL_STEPS.slice(2),
   };
 
-  let selectedFile  = null;
-  let currentJobId  = null;
-  let currentMode   = 'full';
-  let pollTimer     = null;
+  let selectedFile      = null;
+  let selectedFileType  = 'video';   // 'video' | 'image'
+  let currentJobId      = null;
+  let currentMode       = 'full';
+  let currentSourceType = 'video';   // captured at submit time
+  let pollTimer         = null;
 
   // ── Drop Zone ──────────────────────────────────────────────
 
   const dropZone     = document.getElementById('dropZone');
   const fileInput    = document.getElementById('fileInput');
   const videoPreview = document.getElementById('videoPreview');
+  const imagePreview = document.getElementById('imagePreview');
   const dropPH       = document.getElementById('dropPlaceholder');
   const videoFileName= document.getElementById('videoFileName');
   const changeBtn    = document.getElementById('changeVideoBtn');
@@ -797,11 +805,11 @@
     e.preventDefault();
     dropZone.classList.remove('drag-over');
     const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('video/')) setVideo(file);
+    if (file && (file.type.startsWith('video/') || file.type.startsWith('image/'))) setFile(file);
   });
 
   fileInput.addEventListener('change', (e) => {
-    if (e.target.files[0]) setVideo(e.target.files[0]);
+    if (e.target.files[0]) setFile(e.target.files[0]);
   });
 
   changeBtn.addEventListener('click', (e) => {
@@ -838,21 +846,39 @@
     document.querySelector('.media-row').classList.toggle('single-col', mode === 'image_only');
   }
 
-  function setVideo(file) {
-    selectedFile = file;
+  function setFile(file) {
+    selectedFile     = file;
+    selectedFileType = file.type.startsWith('image/') ? 'image' : 'video';
+
+    // Show / hide Frame Second field
+    document.getElementById('secondField').style.display =
+      selectedFileType === 'image' ? 'none' : '';
+
     const url = URL.createObjectURL(file);
-    videoPreview.src = url;
-    videoPreview.play().catch(() => {});
+    if (selectedFileType === 'image') {
+      imagePreview.src          = url;
+      imagePreview.style.display = 'block';
+      videoPreview.style.display = 'none';
+      videoPreview.src           = '';
+    } else {
+      videoPreview.src           = url;
+      videoPreview.style.display = 'block';
+      videoPreview.play().catch(() => {});
+      imagePreview.style.display = 'none';
+      imagePreview.src           = '';
+    }
+
     videoFileName.textContent = file.name;
-    dropZone.classList.add('has-video');
+    dropZone.classList.add('has-file');
     dropZone.classList.remove('drag-over');
   }
 
   // ── Pipeline Rendering ─────────────────────────────────────
 
   function renderSteps(step, status) {
-    // step is 1-based; 0 = not started
-    const steps = STEPS_BY_MODE[currentMode] || ALL_STEPS;
+    // step is 1-based (already adjusted for source offset); 0 = not started
+    const modeKey = currentSourceType === 'image' ? `image_${currentMode}` : currentMode;
+    const steps = STEPS_BY_MODE[modeKey] || ALL_STEPS;
     const list = document.getElementById('stepsList');
     list.innerHTML = steps.map((label, i) => {
       let cls = 'pending';
@@ -893,6 +919,7 @@
     const imageChange = document.getElementById('imageChange').value.trim();
     const videoChange = document.getElementById('videoChange').value.trim();
     currentMode       = getSelectedMode();
+    currentSourceType = selectedFileType;
 
     // Reset right panel
     document.getElementById('emptyState').classList.add('hidden');
@@ -915,7 +942,7 @@
     renderSteps(0, 'running');
 
     const fd = new FormData();
-    fd.append('video', selectedFile);
+    fd.append(currentSourceType === 'image' ? 'image' : 'video', selectedFile);
     fd.append('second', second);
     fd.append('mode', currentMode);
     if (imageChange) fd.append('image_change', imageChange);
@@ -980,7 +1007,8 @@
     }
 
     const data = await res.json();
-    renderSteps(data.step, data.status);
+    const stepOffset = currentSourceType === 'image' ? IMAGE_STEP_OFFSET : 0;
+    renderSteps(data.step - stepOffset, data.status);
 
     if (data.image_ready) revealImage(jobId);
     if (data.video_ready) revealVideo(jobId);

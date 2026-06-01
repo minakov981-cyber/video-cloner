@@ -54,8 +54,13 @@ def index():
 @app.route("/generate", methods=["POST"])
 def generate():
     video_file = request.files.get("video")
-    if not video_file:
-        return jsonify({"error": "No video file provided"}), 400
+    image_file = request.files.get("image")
+
+    if not video_file and not image_file:
+        return jsonify({"error": "No video or image file provided"}), 400
+
+    source_type = "video" if video_file else "image"
+    source_file = video_file if source_type == "video" else image_file
 
     try:
         second = float(request.form.get("second", 0))
@@ -72,15 +77,16 @@ def generate():
     upload_path = UPLOAD_DIR / job_id
     upload_path.mkdir(exist_ok=True)
 
-    filename = secure_filename(video_file.filename or "video.mp4")
-    video_path = str(upload_path / filename)
-    video_file.save(video_path)
+    filename = secure_filename(source_file.filename or ("image.jpg" if source_type == "image" else "video.mp4"))
+    source_path = str(upload_path / filename)
+    source_file.save(source_path)
 
     jobs[job_id] = {
         "status": "running",
         "step": 0,
         "step_name": "",
         "mode": mode,
+        "source_type": source_type,
         "error": None,
         "frame_ready": False,
         "image_ready": False,
@@ -88,11 +94,11 @@ def generate():
         "result": None,
     }
 
-    print(f"[{job_id[:8]}] Job created | file={filename} | size={os.path.getsize(video_path)} bytes | mode={mode}", flush=True)
+    print(f"[{job_id[:8]}] Job created | file={filename} | size={os.path.getsize(source_path)} bytes | mode={mode} | source_type={source_type}", flush=True)
 
     thread = threading.Thread(
         target=_run_pipeline,
-        args=(job_id, video_path, second, image_change, video_change, mode),
+        args=(job_id, source_path, second, image_change, video_change, mode, source_type),
         daemon=True,
         name=f"pipeline-{job_id[:8]}",
     )
@@ -111,28 +117,52 @@ def _set_step(job_id: str, index: int):
     jobs[job_id]["step_name"] = STEPS[index]
 
 
-def _run_pipeline(job_id: str, video_path: str, second: float, image_change, video_change, mode: str = "full"):
-    _log(job_id, f"=== Pipeline started | thread={threading.current_thread().name} | mode={mode} ===")
-    _log(job_id, f"Video: {video_path}")
+def _run_pipeline(job_id: str, video_path: str, second: float, image_change, video_change, mode: str = "full", source_type: str = "video"):
+    _log(job_id, f"=== Pipeline started | thread={threading.current_thread().name} | mode={mode} | source_type={source_type} ===")
+    _log(job_id, f"Source: {video_path}")
     _log(job_id, f"Second: {second} | image_change: {image_change!r} | video_change: {video_change!r}")
 
     try:
         out_dir = OUTPUT_DIR / job_id
         out_dir.mkdir(exist_ok=True)
 
-        # Step 1 — extract frame
-        _log(job_id, "Step 1: extracting frame from video...")
-        _set_step(job_id, 0)
-        frame_path = str(out_dir / "frame.jpg")
-        extract_frame(video_path, second, frame_path)
-        jobs[job_id]["frame_ready"] = True
-        _log(job_id, f"Step 1 done: frame saved to {frame_path}")
+        if source_type == "image":
+            # Use the uploaded image directly as the frame — skip Steps 1 and 2
+            import shutil as _shutil
+            frame_path = str(out_dir / "frame.jpg")
+            _shutil.copy2(video_path, frame_path)
+            jobs[job_id]["frame_ready"] = True
+            _log(job_id, f"Image source: copied upload to {frame_path}")
 
-        # Step 2 — aspect ratio
-        _log(job_id, "Step 2: detecting aspect ratio...")
-        _set_step(job_id, 1)
-        aspect_ratio = get_aspect_ratio(video_path)
-        _log(job_id, f"Step 2 done: aspect_ratio={aspect_ratio}")
+            from PIL import Image as _PILImage
+            with _PILImage.open(frame_path) as _img:
+                _w, _h = _img.size
+            _ratio = _w / _h
+            if _ratio >= 1.7:
+                aspect_ratio = "16:9"
+            elif _ratio >= 1.3:
+                aspect_ratio = "4:3"
+            elif _ratio >= 0.95:
+                aspect_ratio = "1:1"
+            elif _ratio >= 0.55:
+                aspect_ratio = "4:5"
+            else:
+                aspect_ratio = "9:16"
+            _log(job_id, f"Image source: aspect_ratio={aspect_ratio} (from {_w}x{_h})")
+        else:
+            # Step 1 — extract frame
+            _log(job_id, "Step 1: extracting frame from video...")
+            _set_step(job_id, 0)
+            frame_path = str(out_dir / "frame.jpg")
+            extract_frame(video_path, second, frame_path)
+            jobs[job_id]["frame_ready"] = True
+            _log(job_id, f"Step 1 done: frame saved to {frame_path}")
+
+            # Step 2 — aspect ratio
+            _log(job_id, "Step 2: detecting aspect ratio...")
+            _set_step(job_id, 1)
+            aspect_ratio = get_aspect_ratio(video_path)
+            _log(job_id, f"Step 2 done: aspect_ratio={aspect_ratio}")
 
         # Step 3 — GPT analysis
         _log(job_id, "Step 3: analyzing frame with GPT-5.5...")
