@@ -66,6 +66,25 @@ def extract_frame(video_path: str, second: int, output_path: str) -> str:
     return output_path
 
 
+def _detect_ratio(w: int, h: int) -> str:
+    if not w or not h:
+        return "1:1"
+    ratio = w / h
+    candidates = {
+        "1:1":  1.0,
+        "16:9": 16/9,
+        "9:16": 9/16,
+        "4:3":  4/3,
+        "3:4":  3/4,
+        "3:2":  3/2,
+        "2:3":  2/3,
+        "4:5":  4/5,
+        "5:4":  5/4,
+        "21:9": 21/9,
+    }
+    return min(candidates, key=lambda k: abs(candidates[k] - ratio))
+
+
 def get_aspect_ratio(video_path: str) -> str:
     cmd = [
         "ffprobe",
@@ -86,12 +105,7 @@ def get_aspect_ratio(video_path: str) -> str:
 
     w = streams[0].get("width", 0)
     h = streams[0].get("height", 0)
-    if w and h:
-        if w > h:
-            return "16:9"
-        if h > w:
-            return "9:16"
-    return "1:1"
+    return _detect_ratio(w, h)
 
 
 def encode_image(image_path: str) -> str:

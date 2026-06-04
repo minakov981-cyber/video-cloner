@@ -11,6 +11,7 @@ from werkzeug.serving import WSGIRequestHandler
 from werkzeug.utils import secure_filename
 
 from video_analyzer import (
+    _detect_ratio,
     extract_frame,
     get_aspect_ratio,
     analyze_frame,
@@ -137,17 +138,7 @@ def _run_pipeline(job_id: str, video_path: str, second: float, image_change, vid
             from PIL import Image as _PILImage
             with _PILImage.open(frame_path) as _img:
                 _w, _h = _img.size
-            _ratio = _w / _h
-            if _ratio >= 1.7:
-                aspect_ratio = "16:9"
-            elif _ratio >= 1.3:
-                aspect_ratio = "4:3"
-            elif _ratio >= 0.95:
-                aspect_ratio = "1:1"
-            elif _ratio >= 0.55:
-                aspect_ratio = "4:5"
-            else:
-                aspect_ratio = "9:16"
+            aspect_ratio = _detect_ratio(_w, _h)
             _log(job_id, f"Image source: aspect_ratio={aspect_ratio} (from {_w}x{_h})")
         else:
             # Step 1 — extract frame
