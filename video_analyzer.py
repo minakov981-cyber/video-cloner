@@ -113,7 +113,7 @@ def encode_image(image_path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 
-def analyze_frame(frame_path: str, change: str = None, video_change: str = None) -> dict:
+def analyze_frame(frame_path: str, change: str = None, video_change: str = None, clone_mode: str = "video") -> dict:
     print("Analyzing frame with GPT-5.5...")
     b64 = encode_image(frame_path)
 
@@ -127,36 +127,55 @@ def analyze_frame(frame_path: str, change: str = None, video_change: str = None)
         "Keep all other scene details exactly as seen in the image. Only replace or modify the specified element."
     ) if video_change else ""
 
+    if clone_mode == "location":
+        system_content = (
+            "You are a professional visual analyst and AI prompt engineer specialized in location and scene recreation. "
+            "IMPORTANT: Completely ignore any text, titles, subtitles, captions, watermarks, logos, TikTok/Instagram/YouTube overlays, or any social media branding visible on the image. "
+            "Your goal is to describe the physical location, environment, architecture, nature, lighting, and atmosphere so it can be recreated WITHOUT any overlays or branding. "
+            "Analyze ONLY the underlying scene."
+        )
+        user_text = (
+            "Analyze this image and return ONLY valid JSON. Focus on recreating the exact location and scene.\n"
+            "The generated image must have NO watermarks, NO logos, NO text overlays, NO social media branding.\n"
+            "{\n"
+            '  "image_prompt": "Describe the location and scene for recreation: exact environment, architecture or nature details, lighting, time of day, weather, color palette, camera angle, atmosphere. Explicitly include: \'No watermarks, no text overlays, no logos, no social media branding.\' 150-250 words.",\n'
+            '  "video_prompt": "Describe this location as a video scene for Kling 2.6. Include: environment details, camera movement, lighting, atmosphere, motion in the scene. No watermarks or overlays. 150-250 words."\n'
+            f"}}{change_instruction}{video_change_instruction}"
+        )
+    else:
+        system_content = (
+            "You are a professional visual analyst and AI prompt engineer. "
+            "IMPORTANT: Completely ignore any text, titles, subtitles, captions, watermarks, logos, or overlays visible on the image. "
+            "Analyze ONLY the underlying visual scene: subjects, environment, lighting, colors, composition, camera angle, and atmosphere. "
+            "Treat the image as if no text or overlays exist."
+        )
+        user_text = (
+            "Analyze this image and return ONLY valid JSON (no markdown, no code fences):\n"
+            "{\n"
+            '  "image_prompt": "A highly detailed English prompt for an image generator (Midjourney/DALL-E/Flux). '
+            "Describe: exact composition, visual style, genre, mood, color palette, color grading, lighting setup and direction, "
+            "camera angle and lens, exact number of people and objects visible, their positions, clothing, expressions, "
+            'background/environment details, time of day, atmosphere. 150-250 words.",\n'
+            '  "video_prompt": "A highly detailed English prompt optimized for Kling 2.6/3.0 on Loveart. '
+            "Based on this frame, describe the full scene to recreate or extend as a video clip. Include: "
+            "subjects and their actions, environment, visual style, color grading, lighting, camera movement (pan/tilt/zoom/dolly/static/handheld), "
+            'motion intensity and dynamics, mood and atmosphere. 150-250 words."\n'
+            f"}}{change_instruction}{video_change_instruction}"
+        )
+
     response = client.chat.completions.create(
         model="gpt-5.5",
         messages=[
             {
                 "role": "system",
-                "content": (
-                    "You are a professional visual analyst and AI prompt engineer. "
-                    "IMPORTANT: Completely ignore any text, titles, subtitles, captions, watermarks, logos, or overlays visible on the image. "
-                    "Analyze ONLY the underlying visual scene: subjects, environment, lighting, colors, composition, camera angle, and atmosphere. "
-                    "Treat the image as if no text or overlays exist."
-                ),
+                "content": system_content,
             },
             {
                 "role": "user",
                 "content": [
                     {
                         "type": "text",
-                        "text": (
-                            "Analyze this image and return ONLY valid JSON (no markdown, no code fences):\n"
-                            "{\n"
-                            '  "image_prompt": "A highly detailed English prompt for an image generator (Midjourney/DALL-E/Flux). '
-                            "Describe: exact composition, visual style, genre, mood, color palette, color grading, lighting setup and direction, "
-                            "camera angle and lens, exact number of people and objects visible, their positions, clothing, expressions, "
-                            'background/environment details, time of day, atmosphere. 150-250 words.",\n'
-                            '  "video_prompt": "A highly detailed English prompt optimized for Kling 2.6/3.0 on Loveart. '
-                            "Based on this frame, describe the full scene to recreate or extend as a video clip. Include: "
-                            "subjects and their actions, environment, visual style, color grading, lighting, camera movement (pan/tilt/zoom/dolly/static/handheld), "
-                            'motion intensity and dynamics, mood and atmosphere. 150-250 words."\n'
-                            f"}}{change_instruction}{video_change_instruction}"
-                        ),
+                        "text": user_text,
                     },
                     {
                         "type": "image_url",
@@ -182,22 +201,35 @@ def analyze_frame(frame_path: str, change: str = None, video_change: str = None)
         return json.loads(raw.strip())
 
 
-def generate_image_magnific(prompt: str, aspect_ratio: str, out_dir: Path) -> tuple:
+def generate_image_magnific(prompt: str, aspect_ratio: str, out_dir: Path, reference_image: str = None) -> tuple:
     if not MAGNIFIC_API_KEY:
         print("Warning: MAGNIFIC_API_KEY not set — skipping image generation.")
         return None, None
 
     headers = {"x-magnific-api-key": MAGNIFIC_API_KEY}
 
+    payload = {
+        "prompt": prompt,
+        "aspect_ratio": aspect_ratio,
+        "resolution": "2K",
+    }
+
+    if reference_image:
+        with open(reference_image, "rb") as f:
+            ref_b64 = base64.b64encode(f.read()).decode("utf-8")
+        payload["reference_images"] = [
+            {
+                "image": ref_b64,
+                "text": "Use this as reference for the location and scene composition. Remove any watermarks, logos, text overlays, or social media branding visible in the reference.",
+                "mime_type": "image/jpeg",
+            }
+        ]
+
     print("Sending request to Magnific API...")
     response = requests.post(
         MAGNIFIC_BASE,
         headers=headers,
-        json={
-            "prompt": prompt,
-            "aspect_ratio": aspect_ratio,
-            "resolution": "2K",
-        },
+        json=payload,
     )
     if not response.ok:
         print(f"Magnific API error {response.status_code}: {response.text}")

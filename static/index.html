@@ -559,6 +559,15 @@
     /* single-col: image spans full width when video is absent */
     .media-row.single-col { grid-template-columns: 1fr; }
 
+    /* ── Mode Toggle ─────────────────────────────────────── */
+    .mode-toggle-wrap { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
+    .toggle-label { font-size: 12px; font-weight: 500; color: var(--text-dim); transition: color 0.2s; white-space: nowrap; }
+    .toggle-label.active { color: var(--text); }
+    .mode-toggle { position: relative; width: 44px; height: 24px; background: var(--surface-2); border: 1px solid var(--border-hi); border-radius: 12px; cursor: pointer; padding: 0; transition: background 0.2s, border-color 0.2s; flex-shrink: 0; }
+    .mode-toggle.on { background: var(--accent-dim); border-color: var(--accent); }
+    .mode-toggle-thumb { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--text-muted); transition: transform 0.2s, background 0.2s; display: block; }
+    .mode-toggle.on .mode-toggle-thumb { transform: translateX(20px); background: var(--accent-hi); }
+
     /* ── Utility ─────────────────────────────────────────── */
     .hidden { display: none !important; }
   </style>
@@ -579,6 +588,14 @@
         </div>
         <span class="logo-name">Video Cloner</span>
       </div>
+    </div>
+
+    <div class="mode-toggle-wrap">
+      <span class="toggle-label" id="labelLeft">Video Cloner</span>
+      <button class="mode-toggle" id="modeToggle" onclick="switchMode()">
+        <span class="mode-toggle-thumb"></span>
+      </button>
+      <span class="toggle-label" id="labelRight">Location Cloner</span>
     </div>
 
     <div class="panel-body">
@@ -746,6 +763,8 @@
 </div>
 
 <script>
+  let cloneMode = 'video'; // 'video' або 'location'
+
   const ALL_STEPS = [
     "Extracting frame",
     "Aspect ratio",
@@ -947,6 +966,7 @@
     fd.append('mode', currentMode);
     if (imageChange) fd.append('image_change', imageChange);
     if (videoChange) fd.append('video_change', videoChange);
+    fd.append('clone_mode', cloneMode);
 
     try {
       const res  = await fetch('/generate', { method: 'POST', body: fd });
@@ -1094,6 +1114,28 @@
     btn.style.color = 'var(--success)';
     setTimeout(() => btn.style.color = '', 1500);
   }
+
+  function switchMode() {
+    const toggle = document.getElementById('modeToggle');
+    const labelLeft = document.getElementById('labelLeft');
+    const labelRight = document.getElementById('labelRight');
+
+    if (cloneMode === 'video') {
+      cloneMode = 'location';
+      toggle.classList.add('on');
+      labelLeft.classList.remove('active');
+      labelRight.classList.add('active');
+    } else {
+      cloneMode = 'video';
+      toggle.classList.remove('on');
+      labelLeft.classList.add('active');
+      labelRight.classList.remove('active');
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('labelLeft').classList.add('active');
+  });
 </script>
 
 </body>

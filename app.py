@@ -73,6 +73,7 @@ def generate():
     mode = request.form.get("mode", "full")
     if mode not in ("prompts_only", "image_only", "full"):
         mode = "full"
+    clone_mode = request.form.get("clone_mode", "video")
 
     job_id = str(uuid.uuid4())
     upload_path = UPLOAD_DIR / job_id
@@ -95,11 +96,11 @@ def generate():
         "result": None,
     }
 
-    print(f"[{job_id[:8]}] Job created | file={filename} | size={os.path.getsize(source_path)} bytes | mode={mode} | source_type={source_type}", flush=True)
+    print(f"[{job_id[:8]}] Job created | file={filename} | size={os.path.getsize(source_path)} bytes | mode={mode} | source_type={source_type} | clone_mode={clone_mode}", flush=True)
 
     thread = threading.Thread(
         target=_run_pipeline,
-        args=(job_id, source_path, second, image_change, video_change, mode, source_type),
+        args=(job_id, source_path, second, image_change, video_change, mode, source_type, clone_mode),
         daemon=True,
         name=f"pipeline-{job_id[:8]}",
     )
@@ -118,8 +119,8 @@ def _set_step(job_id: str, index: int):
     jobs[job_id]["step_name"] = STEPS[index]
 
 
-def _run_pipeline(job_id: str, video_path: str, second: float, image_change, video_change, mode: str = "full", source_type: str = "video"):
-    _log(job_id, f"=== Pipeline started | thread={threading.current_thread().name} | mode={mode} | source_type={source_type} ===")
+def _run_pipeline(job_id: str, video_path: str, second: float, image_change, video_change, mode: str = "full", source_type: str = "video", clone_mode: str = "video"):
+    _log(job_id, f"=== Pipeline started | thread={threading.current_thread().name} | mode={mode} | source_type={source_type} | clone_mode={clone_mode} ===")
     _log(job_id, f"Source: {video_path}")
     _log(job_id, f"Second: {second} | image_change: {image_change!r} | video_change: {video_change!r}")
 
@@ -158,7 +159,7 @@ def _run_pipeline(job_id: str, video_path: str, second: float, image_change, vid
         # Step 3 — GPT analysis
         _log(job_id, "Step 3: analyzing frame with GPT-5.5...")
         _set_step(job_id, 2)
-        analysis = analyze_frame(frame_path, change=image_change, video_change=video_change)
+        analysis = analyze_frame(frame_path, change=image_change, video_change=video_change, clone_mode=clone_mode)
         image_prompt = analysis.get("image_prompt", "")
         video_prompt = analysis.get("video_prompt", "")
         _log(job_id, f"Step 3 done: image_prompt length={len(image_prompt)} chars, video_prompt length={len(video_prompt)} chars")
@@ -180,7 +181,10 @@ def _run_pipeline(job_id: str, video_path: str, second: float, image_change, vid
         # Step 4 — generate image
         _log(job_id, "Step 4: generating image via Magnific API...")
         _set_step(job_id, 3)
-        generated_image, _ = generate_image_magnific(image_prompt, aspect_ratio, out_dir)
+        if clone_mode == "location":
+            generated_image, _ = generate_image_magnific(image_prompt, aspect_ratio, out_dir, reference_image=frame_path)
+        else:
+            generated_image, _ = generate_image_magnific(image_prompt, aspect_ratio, out_dir)
         if generated_image:
             jobs[job_id]["image_ready"] = True
             _log(job_id, f"Step 4 done: image saved to {generated_image}")
