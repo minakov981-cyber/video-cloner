@@ -21,6 +21,8 @@ MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
 MAGNIFIC_BASE = "https://api.magnific.com/v1/ai/text-to-image/nano-banana-pro"
 MAGNIFIC_VIDEO_POST = "https://api.magnific.com/v1/ai/image-to-video/kling-v2-6-pro"
 MAGNIFIC_VIDEO_STATUS_BASE = "https://api.magnific.com/v1/ai/image-to-video/kling-v2-6"
+MAGNIFIC_UPLOAD_REQUEST = "https://api.magnific.com/v1/creations/request-upload"
+MAGNIFIC_UPLOAD_FINALIZE = "https://api.magnific.com/v1/creations/finalize-upload"
 
 
 def normalize_aspect_ratio(ratio: str) -> str:
@@ -201,6 +203,60 @@ def analyze_frame(frame_path: str, change: str = None, video_change: str = None,
         return json.loads(raw.strip())
 
 
+def _upload_reference_to_magnific(image_path: str, headers: dict) -> str | None:
+    """Upload a local image to Magnific and return its creation identifier."""
+    # Step 1: request presigned upload URL
+    req = requests.post(
+        MAGNIFIC_UPLOAD_REQUEST,
+        headers=headers,
+        json={"mimeType": "image/jpeg"},
+    )
+    if not req.ok:
+        print(f"Magnific upload request failed {req.status_code}: {req.text}")
+        return None
+    req_data = req.json()
+    upload_url = (
+        req_data.get("uploadUrl")
+        or req_data.get("proxyUploadUrl")
+        or req_data.get("url")
+        or (req_data.get("data") or {}).get("uploadUrl")
+    )
+    path = req_data.get("path") or (req_data.get("data") or {}).get("path")
+    if not upload_url or not path:
+        print(f"Magnific upload request: unexpected response: {req_data}")
+        return None
+    print(f"Magnific upload URL received, path={path}")
+
+    # Step 2: PUT the file bytes
+    with open(image_path, "rb") as f:
+        put = requests.put(upload_url, data=f, headers={"Content-Type": "image/jpeg"})
+    if not put.ok:
+        print(f"Magnific file PUT failed {put.status_code}: {put.text}")
+        return None
+
+    # Step 3: finalize — convert temp path to a creation
+    fin = requests.post(
+        MAGNIFIC_UPLOAD_FINALIZE,
+        headers=headers,
+        json={"path": path, "fileName": "frame.jpg", "visible": False},
+    )
+    if not fin.ok:
+        print(f"Magnific finalize failed {fin.status_code}: {fin.text}")
+        return None
+    fin_data = fin.json()
+    identifier = (
+        fin_data.get("identifier")
+        or fin_data.get("id")
+        or (fin_data.get("data") or {}).get("identifier")
+        or (fin_data.get("data") or {}).get("id")
+    )
+    if not identifier:
+        print(f"Magnific finalize: no identifier in response: {fin_data}")
+        return None
+    print(f"Magnific reference uploaded: identifier={identifier}")
+    return identifier
+
+
 def generate_image_magnific(prompt: str, aspect_ratio: str, out_dir: Path, reference_image: str = None) -> tuple:
     if not MAGNIFIC_API_KEY:
         print("Warning: MAGNIFIC_API_KEY not set — skipping image generation.")
@@ -215,15 +271,11 @@ def generate_image_magnific(prompt: str, aspect_ratio: str, out_dir: Path, refer
     }
 
     if reference_image:
-        with open(reference_image, "rb") as f:
-            ref_b64 = base64.b64encode(f.read()).decode("utf-8")
-        payload["reference_images"] = [
-            {
-                "image": ref_b64,
-                "text": "Use this as reference for the location and scene composition. Remove any watermarks, logos, text overlays, or social media branding visible in the reference.",
-                "mime_type": "image/jpeg",
-            }
-        ]
+        identifier = _upload_reference_to_magnific(reference_image, headers)
+        if identifier:
+            payload["references"] = [{"type": "image", "identifier": identifier}]
+        else:
+            print("Warning: reference upload failed — generating without reference")
 
     print("Sending request to Magnific API...")
     response = requests.post(
