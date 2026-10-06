@@ -181,7 +181,10 @@ def _run_pipeline(job_id: str, video_path: str, second: float, image_change, vid
         # Step 4 — generate image
         _log(job_id, "Step 4: generating image via Magnific API...")
         _set_step(job_id, 3)
-        generated_image, _ = generate_image_magnific(image_prompt, aspect_ratio, out_dir)
+        if clone_mode == "location":
+            generated_image, _ = generate_image_magnific(image_prompt, aspect_ratio, out_dir, reference_image=frame_path)
+        else:
+            generated_image, _ = generate_image_magnific(image_prompt, aspect_ratio, out_dir)
         if generated_image:
             jobs[job_id]["image_ready"] = True
             _log(job_id, f"Step 4 done: image saved to {generated_image}")
