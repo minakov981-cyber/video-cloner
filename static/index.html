@@ -572,6 +572,63 @@
     .mode-toggle-thumb { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--text-muted); transition: transform 0.2s, background 0.2s; display: block; }
     .mode-toggle.on .mode-toggle-thumb { transform: translateX(20px); background: var(--accent-hi); }
 
+    /* ── Frame Scrubber ─────────────────────────────────── */
+    .filmstrip {
+      position: relative;
+      height: 64px;
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      cursor: crosshair;
+      background: var(--surface-2);
+      border: 1px solid var(--border-hi);
+      display: flex;
+      user-select: none;
+    }
+
+    .fs-thumb {
+      display: block;
+      flex: 1;
+      min-width: 0;
+      height: 64px;
+    }
+
+    .fs-loading {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; color: var(--text-dim);
+      background: var(--surface-2); z-index: 2;
+    }
+
+    .fs-cursor {
+      position: absolute; top: 0; bottom: 0;
+      width: 2px; background: var(--accent);
+      transform: translateX(-50%);
+      pointer-events: none;
+      box-shadow: 0 0 8px var(--accent-glow);
+      border-radius: 1px; z-index: 3; left: 0;
+    }
+
+    .fs-footer {
+      display: flex; justify-content: space-between;
+      margin-top: 5px; font-size: 11px; color: var(--text-dim);
+    }
+
+    .fs-hover {
+      position: fixed; pointer-events: none;
+      border-radius: var(--radius-sm); overflow: hidden;
+      border: 1.5px solid var(--accent);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.75);
+      z-index: 1000;
+    }
+
+    .fs-hover canvas { display: block; }
+
+    .fs-hover-time {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      padding: 3px 6px; background: rgba(0,0,0,0.72);
+      font-size: 10px; color: rgba(255,255,255,0.9); text-align: center;
+    }
+
     /* ── Utility ─────────────────────────────────────────── */
     .hidden { display: none !important; }
   </style>
@@ -624,10 +681,16 @@
         <input type="file" id="fileInput" accept="video/*,image/*">
       </div>
 
-      <!-- Frame Second -->
-      <div class="field" id="secondField">
-        <label for="second">Frame Second</label>
-        <input type="number" id="second" value="0" step="0.1" min="0" placeholder="e.g. 3.5">
+      <!-- Frame Scrubber -->
+      <div class="hidden" id="filmstripWrap">
+        <div class="filmstrip" id="filmstrip">
+          <div class="fs-loading" id="fsLoading">Extracting frames…</div>
+          <div class="fs-cursor" id="fsCursor"></div>
+        </div>
+        <div class="fs-footer">
+          <span id="fsSelected">▶ 0.0s</span>
+          <span id="fsDur"></span>
+        </div>
       </div>
 
       <!-- Image Instructions -->
@@ -766,6 +829,12 @@
   </main>
 </div>
 
+<!-- Hover frame preview (fixed, outside scroll containers) -->
+<div class="fs-hover hidden" id="fsHover">
+  <canvas id="fsHoverCanvas" width="108" height="192"></canvas>
+  <div class="fs-hover-time" id="fsHoverTime">0.0s</div>
+</div>
+
 <script>
   let cloneMode = 'video'; // 'video' або 'location'
 
@@ -797,6 +866,15 @@
   let currentMode       = 'full';
   let currentSourceType = 'video';   // captured at submit time
   let pollTimer         = null;
+
+  // ── Frame scrubber state ──
+  let selectedSecond    = 0;
+  let filmstripVid      = null;
+  let filmstripDuration = 0;
+  let filmstripBuilt    = false;
+  let fsIsDragging      = false;
+  let fsHoverPending    = false;
+  let fsHoverTarget     = 0;
 
   // ── Drop Zone ──────────────────────────────────────────────
 
@@ -873,9 +951,13 @@
     selectedFile     = file;
     selectedFileType = file.type.startsWith('image/') ? 'image' : 'video';
 
-    // Show / hide Frame Second field
-    document.getElementById('secondField').style.display =
-      selectedFileType === 'image' ? 'none' : '';
+    // Build / hide frame scrubber
+    if (selectedFileType === 'video') {
+      buildFilmstrip(file);
+    } else {
+      document.getElementById('filmstripWrap').classList.add('hidden');
+      selectedSecond = 0;
+    }
 
     const url = URL.createObjectURL(file);
     if (selectedFileType === 'image') {
@@ -938,7 +1020,7 @@
       return;
     }
 
-    const second      = document.getElementById('second').value || '0';
+    const second      = selectedSecond.toFixed(2);
     const imageChange = document.getElementById('imageChange').value.trim();
     const videoChange = document.getElementById('videoChange').value.trim();
     currentMode       = getSelectedMode();
@@ -1139,6 +1221,200 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('labelLeft').classList.add('active');
+  });
+
+  // ── Frame Scrubber ──────────────────────────────────────────────
+
+  function fsFmt(s) { return s.toFixed(1) + 's'; }
+
+  function fsUpdateCursor(pct) {
+    document.getElementById('fsCursor').style.left = (pct * 100) + '%';
+  }
+
+  function fsUpdateLabel() {
+    document.getElementById('fsSelected').textContent = '▶ ' + fsFmt(selectedSecond);
+  }
+
+  function fsGetPct(clientX) {
+    const rect = document.getElementById('filmstrip').getBoundingClientRect();
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  }
+
+  async function buildFilmstrip(file) {
+    filmstripBuilt = false;
+    selectedSecond = 0;
+
+    const wrap    = document.getElementById('filmstripWrap');
+    const strip   = document.getElementById('filmstrip');
+    const loading = document.getElementById('fsLoading');
+
+    strip.querySelectorAll('.fs-thumb').forEach(c => c.remove());
+    loading.style.display = 'flex';
+    loading.textContent   = 'Extracting frames…';
+    wrap.classList.remove('hidden');
+
+    if (filmstripVid) filmstripVid.src = '';
+    filmstripVid = document.createElement('video');
+    filmstripVid.muted   = true;
+    filmstripVid.preload = 'auto';
+    filmstripVid.src     = URL.createObjectURL(file);
+
+    try {
+      await new Promise((resolve, reject) => {
+        filmstripVid.onloadedmetadata = resolve;
+        filmstripVid.onerror = reject;
+      });
+    } catch {
+      loading.textContent = 'Could not load video.';
+      return;
+    }
+
+    filmstripDuration = filmstripVid.duration || 0;
+    document.getElementById('fsDur').textContent = fsFmt(filmstripDuration);
+
+    // Wait for layout so offsetWidth is available
+    await new Promise(r => setTimeout(r, 0));
+
+    const stripW   = strip.offsetWidth;
+    const minThumb = 16;
+    const maxCount = Math.floor(stripW / minThumb);
+    // 1 thumb/sec for short videos, cap by available width
+    const count    = Math.min(maxCount, Math.max(12, Math.ceil(filmstripDuration)));
+    const thumbW   = Math.floor(stripW / count);
+    const thumbH   = 64;
+
+    // Size hover canvas to video aspect ratio
+    const vAR     = (filmstripVid.videoWidth / filmstripVid.videoHeight) || 1;
+    const hvW     = 108;
+    const hvH     = Math.round(hvW / vAR);
+    const hvCanvas = document.getElementById('fsHoverCanvas');
+    hvCanvas.width  = hvW;
+    hvCanvas.height = hvH;
+
+    const cursor = document.getElementById('fsCursor');
+    for (let i = 0; i < count; i++) {
+      const t = filmstripDuration <= 0 ? 0 : (i / (count - 1)) * filmstripDuration;
+      const thumb = document.createElement('canvas');
+      thumb.className = 'fs-thumb';
+      thumb.width     = thumbW;
+      thumb.height    = thumbH;
+      strip.insertBefore(thumb, cursor);
+      await fsSeekDraw(filmstripVid, t, thumb, thumbW, thumbH);
+    }
+
+    loading.style.display = 'none';
+    filmstripBuilt = true;
+    fsUpdateCursor(0);
+    fsUpdateLabel();
+  }
+
+  function fsSeekDraw(video, t, canvas, w, h) {
+    return new Promise(resolve => {
+      video.addEventListener('seeked', function onS() {
+        video.removeEventListener('seeked', onS);
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, w, h);
+        const vr = (video.videoWidth / video.videoHeight) || 1;
+        const cr = w / h;
+        let sx, sy, sw, sh;
+        if (vr > cr) {
+          sh = video.videoHeight; sw = sh * cr;
+          sx = (video.videoWidth - sw) / 2; sy = 0;
+        } else {
+          sw = video.videoWidth; sh = sw / cr;
+          sx = 0; sy = (video.videoHeight - sh) / 2;
+        }
+        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
+        resolve();
+      });
+      video.currentTime = t;
+    });
+  }
+
+  function fsDrawHover() {
+    const canvas = document.getElementById('fsHoverCanvas');
+    const vid    = filmstripVid;
+    if (!canvas || !vid) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    const vr = (vid.videoWidth / vid.videoHeight) || 1;
+    const cr = w / h;
+    let sx, sy, sw, sh;
+    if (vr > cr) {
+      sh = vid.videoHeight; sw = sh * cr;
+      sx = (vid.videoWidth - sw) / 2; sy = 0;
+    } else {
+      sw = vid.videoWidth; sh = sw / cr;
+      sx = 0; sy = (vid.videoHeight - sh) / 2;
+    }
+    ctx.drawImage(vid, sx, sy, sw, sh, 0, 0, w, h);
+  }
+
+  function fsDoHoverSeek() {
+    if (!filmstripVid || !filmstripBuilt) return;
+    const t = fsHoverTarget;
+    filmstripVid.currentTime = t;
+    filmstripVid.addEventListener('seeked', function onS() {
+      filmstripVid.removeEventListener('seeked', onS);
+      fsDrawHover();
+      if (Math.abs(filmstripVid.currentTime - fsHoverTarget) > 0.08) {
+        fsDoHoverSeek();
+      } else {
+        fsHoverPending = false;
+      }
+    });
+  }
+
+  // ── Filmstrip event listeners ───────────────────────────────────
+
+  const fsStrip = document.getElementById('filmstrip');
+
+  fsStrip.addEventListener('mousedown', (e) => {
+    if (!filmstripBuilt) return;
+    fsIsDragging = true;
+    const pct = fsGetPct(e.clientX);
+    selectedSecond = pct * filmstripDuration;
+    fsUpdateCursor(pct);
+    fsUpdateLabel();
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!fsIsDragging || !filmstripBuilt) return;
+    const pct = fsGetPct(e.clientX);
+    selectedSecond = pct * filmstripDuration;
+    fsUpdateCursor(pct);
+    fsUpdateLabel();
+  });
+
+  document.addEventListener('mouseup', () => { fsIsDragging = false; });
+
+  fsStrip.addEventListener('mousemove', (e) => {
+    if (!filmstripBuilt || !filmstripVid) return;
+    const rect  = fsStrip.getBoundingClientRect();
+    const pct   = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    fsHoverTarget = pct * filmstripDuration;
+
+    const hover   = document.getElementById('fsHover');
+    const hCanvas = document.getElementById('fsHoverCanvas');
+    const hvW = hCanvas.width, hvH = hCanvas.height;
+
+    const x = Math.max(8, Math.min(window.innerWidth - hvW - 8, e.clientX - hvW / 2));
+    const y = Math.max(8, e.clientY - hvH - 14);
+    hover.style.left = x + 'px';
+    hover.style.top  = y + 'px';
+    document.getElementById('fsHoverTime').textContent = fsFmt(fsHoverTarget);
+    hover.classList.remove('hidden');
+
+    if (!fsHoverPending) {
+      fsHoverPending = true;
+      fsDoHoverSeek();
+    }
+  });
+
+  fsStrip.addEventListener('mouseleave', () => {
+    document.getElementById('fsHover').classList.add('hidden');
+    fsHoverPending = false;
   });
 </script>
 
