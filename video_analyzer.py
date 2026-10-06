@@ -24,9 +24,9 @@ MAGNIFIC_UPLOAD_REQUEST = "https://api.magnific.com/v1/creations/request-upload"
 MAGNIFIC_UPLOAD_FINALIZE = "https://api.magnific.com/v1/creations/finalize-upload"
 
 # Image model registry: id → REST slug used in the TTI endpoint URL
+# Only add models here after verifying their REST slug works (404 = wrong slug)
 IMAGE_MODELS: dict[str, str] = {
-    "nano-banana-pro": "nano-banana-pro",   # Google Nano Banana Pro
-    "nano-banana-2":   "nano-banana-2-flash",  # Google Nano Banana 2
+    "nano-banana-pro": "nano-banana-pro",   # Google Nano Banana Pro ✓ confirmed
     "seedream-5-pro":  "seedream-5-pro",    # Seedream 5 Pro
     "recraft-v4-1":    "recraft-v4-1",      # Recraft V4.1
     "flux-dev":        "flux-dev",          # Flux.1
