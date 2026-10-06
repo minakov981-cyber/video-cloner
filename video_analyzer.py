@@ -359,19 +359,27 @@ def generate_video_magnific(image_path: str, prompt: str, aspect_ratio: str, out
         b64_image = base64.b64encode(f.read()).decode("utf-8")
 
     print(f"Sending request to {vid_cfg.get('label', model_id)} (image-to-video)...")
-    response = requests.post(
-        post_url,
-        headers=headers,
-        json={
-            "prompt": prompt,
-            "image": b64_image,
-            "duration": "5",
-            "aspect_ratio": kling_aspect,
-            "generate_audio": False,
-        },
-    )
-    if not response.ok:
+    payload = {
+        "prompt": prompt,
+        "image": b64_image,
+        "duration": "5",
+        "aspect_ratio": kling_aspect,
+        "generate_audio": False,
+    }
+    response = None
+    for attempt in range(1, 4):
+        response = requests.post(post_url, headers=headers, json=payload)
+        if response.ok:
+            break
+        if response.status_code >= 500:
+            print(f"Video API {response.status_code} (attempt {attempt}/3): {response.text[:200]}")
+            if attempt < 3:
+                time.sleep(15 * attempt)
+                continue
         print(f"Video API error {response.status_code}: {response.text}")
+        return None
+    if not response or not response.ok:
+        print(f"Video API failed after 3 attempts.")
         return None
     task_id = response.json()["data"]["task_id"]
     print(f"Video task_id: {task_id}")
