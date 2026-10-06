@@ -301,13 +301,20 @@ def generate_image_magnific(prompt: str, aspect_ratio: str, out_dir: Path, refer
             print("Warning: reference upload failed — generating without reference")
 
     print("Sending request to Magnific API...")
-    response = requests.post(
-        api_url,
-        headers=headers,
-        json=payload,
-    )
-    if not response.ok:
+    response = None
+    for attempt in range(1, 4):
+        response = requests.post(api_url, headers=headers, json=payload)
+        if response.ok:
+            break
+        if response.status_code >= 500:
+            print(f"Magnific API {response.status_code} (attempt {attempt}/3): {response.text[:200]}")
+            if attempt < 3:
+                time.sleep(15 * attempt)
+                continue
         print(f"Magnific API error {response.status_code}: {response.text}")
+        return None, None
+    if not response or not response.ok:
+        print("Magnific API failed after 3 attempts.")
         return None, None
     task_id = response.json()["data"]["task_id"]
     print(f"Magnific task_id: {task_id}")
