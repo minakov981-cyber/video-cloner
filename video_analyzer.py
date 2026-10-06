@@ -18,11 +18,29 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
-MAGNIFIC_BASE = "https://api.magnific.com/v1/ai/text-to-image/nano-banana-pro"
-MAGNIFIC_VIDEO_POST = "https://api.magnific.com/v1/ai/image-to-video/kling-v2-6-pro"
-MAGNIFIC_VIDEO_STATUS_BASE = "https://api.magnific.com/v1/ai/image-to-video/kling-v2-6"
+_MAGNIFIC_TTI  = "https://api.magnific.com/v1/ai/text-to-image"
+_MAGNIFIC_ITV  = "https://api.magnific.com/v1/ai/image-to-video"
 MAGNIFIC_UPLOAD_REQUEST = "https://api.magnific.com/v1/creations/request-upload"
 MAGNIFIC_UPLOAD_FINALIZE = "https://api.magnific.com/v1/creations/finalize-upload"
+
+# Image model registry: id → REST slug used in the TTI endpoint URL
+IMAGE_MODELS: dict[str, str] = {
+    "nano-banana-pro": "nano-banana-pro",   # Google Nano Banana Pro
+    "nano-banana-2":   "nano-banana-2-flash",  # Google Nano Banana 2
+    "seedream-5-pro":  "seedream-5-pro",    # Seedream 5 Pro
+    "recraft-v4-1":    "recraft-v4-1",      # Recraft V4.1
+    "flux-dev":        "flux-dev",          # Flux.1
+    "flux-kontext":    "flux-kontext",      # Flux.1 Kontext Pro
+}
+DEFAULT_IMAGE_MODEL = "nano-banana-pro"
+
+# Video model registry: id → {post: slug for generation, status: slug for polling}
+VIDEO_MODELS: dict[str, dict] = {
+    "kling-v2-6-pro": {"post": "kling-v2-6-pro", "status": "kling-v2-6",  "label": "Kling 2.6 Pro"},
+    "kling-v3-0-pro": {"post": "kling-v3-0-pro", "status": "kling-v3-0",  "label": "Kling 3.0 Pro"},
+    "kling-v2-5-pro": {"post": "kling-v2-5-pro", "status": "kling-v2-5",  "label": "Kling 2.5 Pro"},
+}
+DEFAULT_VIDEO_MODEL = "kling-v2-6-pro"
 
 
 def normalize_aspect_ratio(ratio: str) -> str:
@@ -257,10 +275,15 @@ def _upload_reference_to_magnific(image_path: str, headers: dict) -> str | None:
     return identifier
 
 
-def generate_image_magnific(prompt: str, aspect_ratio: str, out_dir: Path, reference_image: str = None) -> tuple:
+def generate_image_magnific(prompt: str, aspect_ratio: str, out_dir: Path, reference_image: str = None, image_model: str = None) -> tuple:
     if not MAGNIFIC_API_KEY:
         print("Warning: MAGNIFIC_API_KEY not set — skipping image generation.")
         return None, None
+
+    model_id   = image_model or DEFAULT_IMAGE_MODEL
+    model_slug = IMAGE_MODELS.get(model_id, model_id)
+    api_url    = f"{_MAGNIFIC_TTI}/{model_slug}"
+    print(f"Image model: {model_id} → endpoint: {api_url}")
 
     headers = {"x-magnific-api-key": MAGNIFIC_API_KEY}
 
@@ -279,7 +302,7 @@ def generate_image_magnific(prompt: str, aspect_ratio: str, out_dir: Path, refer
 
     print("Sending request to Magnific API...")
     response = requests.post(
-        MAGNIFIC_BASE,
+        api_url,
         headers=headers,
         json=payload,
     )
@@ -293,7 +316,7 @@ def generate_image_magnific(prompt: str, aspect_ratio: str, out_dir: Path, refer
     while True:
         time.sleep(5)
         status_response = requests.get(
-            f"{MAGNIFIC_BASE}/{task_id}",
+            f"{api_url}/{task_id}",
             headers=headers,
         )
         status_response.raise_for_status()
@@ -318,10 +341,16 @@ def generate_image_magnific(prompt: str, aspect_ratio: str, out_dir: Path, refer
     return image_path, image_url
 
 
-def generate_video_magnific(image_path: str, prompt: str, aspect_ratio: str, out_dir: Path) -> str:
+def generate_video_magnific(image_path: str, prompt: str, aspect_ratio: str, out_dir: Path, video_model: str = None) -> str:
     if not MAGNIFIC_API_KEY:
         print("Warning: MAGNIFIC_API_KEY not set — skipping video generation.")
         return None
+
+    model_id  = video_model or DEFAULT_VIDEO_MODEL
+    vid_cfg   = VIDEO_MODELS.get(model_id, {"post": model_id, "status": model_id, "label": model_id})
+    post_url  = f"{_MAGNIFIC_ITV}/{vid_cfg['post']}"
+    stat_base = f"{_MAGNIFIC_ITV}/{vid_cfg['status']}"
+    print(f"Video model: {model_id} → post: {post_url}, status: {stat_base}/<task_id>")
 
     headers = {"x-magnific-api-key": MAGNIFIC_API_KEY}
     kling_aspect = normalize_aspect_ratio(aspect_ratio)
@@ -329,9 +358,9 @@ def generate_video_magnific(image_path: str, prompt: str, aspect_ratio: str, out
     with open(image_path, "rb") as f:
         b64_image = base64.b64encode(f.read()).decode("utf-8")
 
-    print("Sending request to Kling 2.6 Pro (image-to-video)...")
+    print(f"Sending request to {vid_cfg.get('label', model_id)} (image-to-video)...")
     response = requests.post(
-        MAGNIFIC_VIDEO_POST,
+        post_url,
         headers=headers,
         json={
             "prompt": prompt,
@@ -342,10 +371,10 @@ def generate_video_magnific(image_path: str, prompt: str, aspect_ratio: str, out
         },
     )
     if not response.ok:
-        print(f"Kling API error {response.status_code}: {response.text}")
+        print(f"Video API error {response.status_code}: {response.text}")
         return None
     task_id = response.json()["data"]["task_id"]
-    print(f"Kling task_id: {task_id}")
+    print(f"Video task_id: {task_id}")
 
     max_wait_seconds = 900
     elapsed = 0
@@ -356,7 +385,7 @@ def generate_video_magnific(image_path: str, prompt: str, aspect_ratio: str, out
         time.sleep(poll_interval)
         elapsed += poll_interval
         status_response = requests.get(
-            f"{MAGNIFIC_VIDEO_STATUS_BASE}/{task_id}",
+            f"{stat_base}/{task_id}",
             headers=headers,
         )
         if status_response.status_code == 404:
@@ -383,7 +412,7 @@ def generate_video_magnific(image_path: str, prompt: str, aspect_ratio: str, out
         print(f"\nTimeout: video not ready after {max_wait_seconds}s.")
         task_file = str(out_dir / "video_task_id.txt")
         with open(task_file, "w") as f:
-            f.write(f"task_id: {task_id}\nstatus_url: {MAGNIFIC_VIDEO_STATUS_BASE}/{task_id}\n")
+            f.write(f"task_id: {task_id}\nstatus_url: {stat_base}/{task_id}\n")
         print(f"Task ID saved to: {task_file}")
         return None
 

@@ -629,6 +629,34 @@
       font-size: 10px; color: rgba(255,255,255,0.9); text-align: center;
     }
 
+    /* ── Select ──────────────────────────────────────────── */
+    .field select {
+      background: var(--surface);
+      border: 1px solid var(--border-hi);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-size: 13px;
+      font-family: inherit;
+      padding: 8px 30px 8px 11px;
+      outline: none;
+      width: 100%;
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      -webkit-appearance: none;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2371717a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 11px center;
+    }
+    .field select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-dim);
+    }
+    .field select option {
+      background: #1c1c1f;
+      color: var(--text);
+    }
+
     /* ── Utility ─────────────────────────────────────────── */
     .hidden { display: none !important; }
   </style>
@@ -720,6 +748,28 @@
             Image only
           </label>
         </div>
+      </div>
+
+      <!-- Model Selection -->
+      <div class="field" id="imageModelField">
+        <label for="imageModel">Image Model</label>
+        <select id="imageModel">
+          <option value="nano-banana-pro">Google Nano Banana Pro</option>
+          <option value="nano-banana-2">Google Nano Banana 2</option>
+          <option value="seedream-5-pro">Seedream 5 Pro</option>
+          <option value="recraft-v4-1">Recraft V4.1</option>
+          <option value="flux-dev">Flux.1</option>
+          <option value="flux-kontext">Flux.1 Kontext Pro</option>
+        </select>
+      </div>
+
+      <div class="field" id="videoModelField">
+        <label for="videoModel">Video Model</label>
+        <select id="videoModel">
+          <option value="kling-v2-6-pro">Kling 2.6 Pro</option>
+          <option value="kling-v3-0-pro">Kling 3.0 Pro</option>
+          <option value="kling-v2-5-pro">Kling 2.5 Pro</option>
+        </select>
       </div>
 
       <!-- Generate -->
@@ -935,12 +985,19 @@
         chip.classList.add('active');
         input.checked = true;
       }
+      updateModelFieldVisibility();
     });
   });
 
   function getSelectedMode() {
     const active = document.querySelector('.mode-chip.active input');
     return active ? active.value : 'full';
+  }
+
+  function updateModelFieldVisibility() {
+    const mode = getSelectedMode();
+    document.getElementById('imageModelField').classList.toggle('hidden', mode === 'prompts_only');
+    document.getElementById('videoModelField').classList.toggle('hidden', mode === 'prompts_only' || mode === 'image_only');
   }
 
   function setMediaRowMode(mode) {
@@ -1023,6 +1080,8 @@
     const second      = selectedSecond.toFixed(2);
     const imageChange = document.getElementById('imageChange').value.trim();
     const videoChange = document.getElementById('videoChange').value.trim();
+    const imageModel  = document.getElementById('imageModel').value;
+    const videoModel  = document.getElementById('videoModel').value;
     currentMode       = getSelectedMode();
     currentSourceType = selectedFileType;
 
@@ -1053,6 +1112,8 @@
     if (imageChange) fd.append('image_change', imageChange);
     if (videoChange) fd.append('video_change', videoChange);
     fd.append('clone_mode', cloneMode);
+    fd.append('image_model', imageModel);
+    fd.append('video_model', videoModel);
 
     try {
       const res  = await fetch('/generate', { method: 'POST', body: fd });

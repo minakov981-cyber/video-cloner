@@ -17,6 +17,10 @@ from video_analyzer import (
     analyze_frame,
     generate_image_magnific,
     generate_video_magnific,
+    IMAGE_MODELS,
+    VIDEO_MODELS,
+    DEFAULT_IMAGE_MODEL,
+    DEFAULT_VIDEO_MODEL,
 )
 
 REQUEST_TIMEOUT = 600  # seconds
@@ -73,7 +77,13 @@ def generate():
     mode = request.form.get("mode", "full")
     if mode not in ("prompts_only", "image_only", "full"):
         mode = "full"
-    clone_mode = request.form.get("clone_mode", "video")
+    clone_mode  = request.form.get("clone_mode", "video")
+    image_model = request.form.get("image_model") or DEFAULT_IMAGE_MODEL
+    video_model = request.form.get("video_model") or DEFAULT_VIDEO_MODEL
+    if image_model not in IMAGE_MODELS:
+        image_model = DEFAULT_IMAGE_MODEL
+    if video_model not in VIDEO_MODELS:
+        video_model = DEFAULT_VIDEO_MODEL
 
     job_id = str(uuid.uuid4())
     upload_path = UPLOAD_DIR / job_id
@@ -96,11 +106,11 @@ def generate():
         "result": None,
     }
 
-    print(f"[{job_id[:8]}] Job created | file={filename} | size={os.path.getsize(source_path)} bytes | mode={mode} | source_type={source_type} | clone_mode={clone_mode}", flush=True)
+    print(f"[{job_id[:8]}] Job created | file={filename} | size={os.path.getsize(source_path)} bytes | mode={mode} | source_type={source_type} | clone_mode={clone_mode} | image_model={image_model} | video_model={video_model}", flush=True)
 
     thread = threading.Thread(
         target=_run_pipeline,
-        args=(job_id, source_path, second, image_change, video_change, mode, source_type, clone_mode),
+        args=(job_id, source_path, second, image_change, video_change, mode, source_type, clone_mode, image_model, video_model),
         daemon=True,
         name=f"pipeline-{job_id[:8]}",
     )
@@ -119,8 +129,8 @@ def _set_step(job_id: str, index: int):
     jobs[job_id]["step_name"] = STEPS[index]
 
 
-def _run_pipeline(job_id: str, video_path: str, second: float, image_change, video_change, mode: str = "full", source_type: str = "video", clone_mode: str = "video"):
-    _log(job_id, f"=== Pipeline started | thread={threading.current_thread().name} | mode={mode} | source_type={source_type} | clone_mode={clone_mode} ===")
+def _run_pipeline(job_id: str, video_path: str, second: float, image_change, video_change, mode: str = "full", source_type: str = "video", clone_mode: str = "video", image_model: str = None, video_model: str = None):
+    _log(job_id, f"=== Pipeline started | thread={threading.current_thread().name} | mode={mode} | source_type={source_type} | clone_mode={clone_mode} | image_model={image_model} | video_model={video_model} ===")
     _log(job_id, f"Source: {video_path}")
     _log(job_id, f"Second: {second} | image_change: {image_change!r} | video_change: {video_change!r}")
 
@@ -182,9 +192,9 @@ def _run_pipeline(job_id: str, video_path: str, second: float, image_change, vid
         _log(job_id, "Step 4: generating image via Magnific API...")
         _set_step(job_id, 3)
         if clone_mode == "location":
-            generated_image, _ = generate_image_magnific(image_prompt, aspect_ratio, out_dir, reference_image=frame_path)
+            generated_image, _ = generate_image_magnific(image_prompt, aspect_ratio, out_dir, reference_image=frame_path, image_model=image_model)
         else:
-            generated_image, _ = generate_image_magnific(image_prompt, aspect_ratio, out_dir)
+            generated_image, _ = generate_image_magnific(image_prompt, aspect_ratio, out_dir, image_model=image_model)
         if generated_image:
             jobs[job_id]["image_ready"] = True
             _log(job_id, f"Step 4 done: image saved to {generated_image}")
@@ -210,7 +220,7 @@ def _run_pipeline(job_id: str, video_path: str, second: float, image_change, vid
         _set_step(job_id, 4)
         generated_video = None
         if generated_image:
-            generated_video = generate_video_magnific(generated_image, video_prompt, aspect_ratio, out_dir)
+            generated_video = generate_video_magnific(generated_image, video_prompt, aspect_ratio, out_dir, video_model=video_model)
             if generated_video:
                 jobs[job_id]["video_ready"] = True
                 _log(job_id, f"Step 5 done: video saved to {generated_video}")
